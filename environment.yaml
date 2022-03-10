@@ -1,0 +1,19 @@
+name: retro
+channels:
+    - pytorch
+    - huggingface
+    - conda-forge
+    - defaults
+dependencies:
+    - python>=3.9
+    - pip>=22
+    - pytorch>=1.10
+    - numpy
+    - transformers
+    - datasets
+    - faiss-cpu
+    - einops
+    - sentencepiece
+    - ipykernel
+    - pip:
+        - tqdm
