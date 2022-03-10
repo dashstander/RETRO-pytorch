@@ -6,7 +6,7 @@ import torch.nn.functional as F
 import logging
 import numpy as np
 from einops import rearrange
-
+from tqdm import tqdm
 import faiss
 from autofaiss import build_index
 
@@ -122,6 +122,71 @@ def doc_text_to_chunks_and_seq_indices(
     seq = torch.arange(0, total_chunks, num_chunks_per_seq)
 
     return chunks_with_extra_token, seq
+
+
+
+def text_dataset_to_chunks_(
+    *,
+    dataset,
+    chunks_memmap_path,
+    seqs_memmap_path,
+    doc_ids_memmap_path,
+    chunk_size = 64,
+    seq_len = 2048,
+    max_chunks = 1_00_000_000,
+    max_seqs = 1_00_000
+):
+
+    total_chunks = 0
+    total_docs = 0
+    total_seqs = 0
+
+    chunks_shape = (max_chunks, chunk_size + 1)
+    seqs_shape = (max_seqs,)
+    doc_ids_shape = (max_chunks,)
+    seq_stack = []
+    chunk_stack = []
+
+    with (
+        # huge on-disk numpy array of shape (VERY_BIG, 65), writes a set of length-65 rows which made up of token IDs
+        memmap(chunks_memmap_path, shape = chunks_shape, dtype = np.int32, mode = 'w+') as chunks_memmap,
+        # 
+        memmap(seqs_memmap_path, shape = seqs_shape, dtype = np.int32, mode = 'w+') as seqs_memmap,
+        memmap(doc_ids_memmap_path, shape = doc_ids_shape, dtype = np.int32, mode = 'w+') as doc_ids_memmap
+    ):
+        for text in tqdm(dataset):
+            chunks, seq = doc_text_to_chunks_and_seq_indices(
+                doc_text = text['title'] + '\n\n' + text['text'],
+                chunk_size = chunk_size,
+                seq_len = seq_len
+            )
+            """
+            chunk_stack.append(chunks)
+            seq_stack.append(seq)
+            if len(chunk_stack) > 50:
+                chunk_stack.pop(0)
+                seq_stack.pop(0)
+            """
+            doc_chunk_len = chunks.shape[0]
+            doc_seq_len = seq.shape[0]
+            chunks_memmap[total_chunks:(total_chunks + doc_chunk_len)] = chunks.numpy()
+            try:
+                seqs_memmap[total_seqs:(total_seqs + doc_seq_len)] = seq.numpy() + total_chunks
+            except ValueError as ve:
+                for chunk_hist, seq_hist in zip(chunk_stack, seq_stack):
+                    print(seq_hist, chunk_hist)
+                raise ve
+            doc_ids_memmap[total_chunks:(total_chunks + doc_chunk_len)] = np.full((doc_chunk_len,), total_docs)
+            last_seq = seq
+            total_chunks += doc_chunk_len
+            total_seqs += doc_seq_len
+            total_docs += 1
+
+    return dict(
+        chunks = total_chunks,
+        docs = total_docs,
+        seqs = total_seqs
+    )
 
 def text_folder_to_chunks_(
     *,
@@ -382,7 +447,7 @@ def chunks_to_precalculated_knn_(
     with memmap(knn_path, shape = (num_chunks, num_nearest_neighbors), dtype = np.int32, mode = 'w+') as knns\
         , memmap(doc_ids_memmap_path, shape = (num_chunks,), dtype = np.int32, mode = 'r') as doc_ids:
 
-        for dim_slice in range_chunked(num_chunks, batch_size = max_rows_per_file):
+        for dim_slice in tqdm(range_chunked(num_chunks, batch_size = max_rows_per_file)):
             query_vector = embeddings[dim_slice]
 
             distances, indices = index.search(query_vector, k = total_neighbors_to_fetch)
