@@ -4,7 +4,7 @@ from retro_pytorch.retrieval import text_dataset_to_chunks_, chunks_to_precalcul
 import torch.nn.functional as F
 
 
-dataset = load_dataset("wikipedia", "20200501.en")
+dataset = load_dataset("wikipedia", "20200501.en")['train']
 
 
 chunk_size = 64
